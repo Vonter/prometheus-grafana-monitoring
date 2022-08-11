@@ -1,0 +1,221 @@
+defaultRules:
+  create: true
+  rules:
+    alertmanager: true
+    etcd: false
+    configReloaders: true
+    general: true
+    k8s: true
+    kubeApiserver: true
+    kubeApiserverAvailability: true
+    kubeApiserverSlos: true
+    kubelet: true
+    kubeProxy: false
+    kubePrometheusGeneral: true
+    kubePrometheusNodeRecording: true
+    kubernetesApps: true
+    kubernetesResources: true
+    kubernetesStorage: true
+    kubernetesSystem: false
+    kubeScheduler: false
+    kubeStateMetrics: true
+    network: true
+    node: true
+    nodeExporterAlerting: true
+    nodeExporterRecording: true
+    prometheus: true
+    prometheusOperator: true
+
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    retention: 60d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: standard
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 128Gi
+    logFormat: json
+    resources:
+      requests:
+        memory: 1000Mi
+      limits:
+        memory: 1500Mi
+    additionalScrapeConfigs:
+    # Below `api-health` job requires the `prometheus-blackbox-exporter` to be installed on the cluster
+    - job_name: api-health
+      metrics_path: /probe
+      scrape_interval: 30s
+      scrape_timeout: 20s
+      params:
+        module: [http_2xx]
+      static_configs:
+        - targets:
+          - http://google.com
+          - http://youtube.com
+          - http://facebook.com
+          - http://reddit.com
+          - http://amazon.com
+          - http://netflix.com
+          - http://twitter.com
+      relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: target
+      - target_label: __address__ 
+        replacement: prometheus-blackbox-exporter:9115
+    # Below `postgres-exporter` job requires the `prometheus-postgres-exporter` to be installed on the cluster
+    - job_name: postgres-exporter
+      static_configs:
+        - targets:
+          - prometheus-postgres-exporter:9187
+    # Below `ingress-nginx` job monitors the Ingress Controller in the cluster
+    #- job_name: ingress-nginx
+    #  metrics_path: /metrics
+    #  scrape_interval: 5s
+    #  static_configs:
+    #    - targets:
+    #      - ingress.namespace.svc.cluster.local:10254
+
+alertmanagerSpec:
+  logFormat: json
+  retention: 120h
+
+prometheusOperator:
+  logFormat: json
+
+additionalPrometheusRulesMap:
+  - rule-name: infraRules
+    groups:
+    - name: infra_rules
+      rules:
+
+      # Rule to check Node CPU Usage
+      - alert: NodeCPUUsage
+        annotations:
+          description: |
+            An alert that fires when CPU usage on a node exceeds 80% for 5 minute
+        expr: avg without (mode,cpu) (1 - rate(node_cpu_seconds_total{mode="idle"}[1m]))
+          * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+
+      # Rule to check Node Memory Usage
+      - alert: NodeMemoryUsage
+        annotations:
+          description: |
+            An alert that fires when memory usage on a node exceeds 80% for 5 minute
+        expr: instance:node_memory_utilisation:ratio * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+
+      # Rule to check Pod CPU Usage
+      - alert: PodCPUUsage
+        annotations:
+          description: |
+            An alert that fires when CPU usage on a pod exceeds 80% for 5 minute
+        expr: (sum(rate(container_cpu_usage_seconds_total{name!=""}[1m])) by (instance,
+          name) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+
+      # Rule to check Pod Memory Usage
+      - alert: PodMemoryUsage
+        annotations:
+          description: |
+            An alert that fires when memory usage on a pod exceeds 80% for 5 minute
+        expr: ((container_memory_working_set_bytes{container!=""}) / (container_spec_memory_limit_bytes > 0) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+
+alertmanager:
+  config:
+    global:
+      resolve_timeout: 1m
+      #slack_api_url: <SLACK-WEBHOOK>
+    route:
+      receiver: 'null'
+      group_by: ['job']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      routes:
+      - match:
+          alertname: Watchdog
+        receiver: 'null'
+      - match_re:
+          severity: '^(warning|critical)$'
+        receiver: 'slack'
+    receivers:
+    - name: 'null'
+    - name: 'slack'
+      slack_configs:
+      - send_resolved: true
+        icon_url: https://avatars3.githubusercontent.com/u/3380462
+        title: |-
+         [{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }} for {{ .CommonLabels.job }}
+         {{- if gt (len .CommonLabels) (len .GroupLabels) -}}
+           {{" "}}(
+           {{- with .CommonLabels.Remove .GroupLabels.Names }}
+             {{- range $index, $label := .SortedPairs -}}
+               {{ if $index }}, {{ end }}
+               {{- $label.Name }}="{{ $label.Value -}}"
+             {{- end }}
+           {{- end -}}
+           )
+         {{- end }}
+
+        text: >-
+         {{ range .Alerts -}}
+         *Alert:* {{ .Annotations.title }}{{ if .Labels.severity }} - `{{ .Labels.severity }}`{{ end }}
+
+         *Description:* {{ .Annotations.description }}
+
+         *Details:*
+           {{ range .Labels.SortedPairs }} • *{{ .Name }}:* `{{ .Value }}`
+           {{ end }}
+         {{ end }}
+    templates:
+    - '/etc/alertmanager/config/*.tmpl'
+
+grafana:
+  adminPassword: password
+  defaultDashboardsTimezone: "Asia/Kolkata"
+  # Creates a Dashboard Provider
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+      - name: 'grafana-dashboard-provider'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/grafana-dashboard-provider
+  # Installs the `redis-datasource` plugin for the redis Dashboard
+  plugins:
+    - redis-datasource
+  # Configuration for the `redis` instance to be monitored
+  additionalDataSources:
+  - name: Redis
+    editable: true
+    type: redis-datasource
+    url: http://127.0.0.1

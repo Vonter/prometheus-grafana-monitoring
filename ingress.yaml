@@ -1,0 +1,46 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: grafana-ingress
+  annotations:
+    kubernetes.io/ingress.class: "ingress"
+    nginx.ingress.kubernetes.io/whitelist-source-range: 127.0.0.1
+  namespace: prometheus
+spec:
+  tls:
+  - hosts:
+    - grafana.example.com
+    secretName: "prometheus-cert"
+  rules:
+  - host: grafana.example.com
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: prometheus-grafana
+          servicePort: 80
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: prometheus-ingress
+  annotations:
+    kubernetes.io/ingress.class: "ingress"
+    nginx.ingress.kubernetes.io/whitelist-source-range: 127.0.0.1
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: prometheus-basic-auth
+    nginx.ingress.kubernetes.io/auth-realm: 'Authentication Required To Proceed'
+  namespace: prometheus
+spec:
+  tls:
+  - hosts:
+    - prometheus.s.grafana.com
+    secretName: "prometheus-cert"
+  rules:
+  - host: prometheus.s.grafana.com
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: prometheus-kube-prometheus-prometheus
+          servicePort: 9090

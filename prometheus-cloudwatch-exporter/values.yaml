@@ -1,0 +1,25 @@
+aws:
+  role: prometheus-cloudwatch-role
+
+config: |-
+  region: ap-south-1
+  # https://github.com/prometheus/cloudwatch_exporter/issues/137#issuecomment-508684410
+  set_timestamp: false
+  metrics:
+  - aws_namespace: AWS/S3
+    aws_metric_name: NumberOfObjects
+    aws_dimensions: [BucketName, StorageType]
+    aws_dimension_select:
+      BucketName: [bucket-to-monitor]
+      StorageType: [AllStorageTypes]
+    aws_statistics: [Minimum]
+    range_seconds: 172800
+    period_seconds: 86400
+
+  - aws_namespace: AWS/SNS
+    aws_metric_name: NumberOfMessagesPublished
+    aws_dimensions: [TopicName]
+    aws_dimension_select:
+      TopicName: [sns-topic-to-monitor]
+    range_seconds: 172800
+    period_seconds: 86400
